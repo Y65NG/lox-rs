@@ -18,8 +18,8 @@ impl AstPrinter {
 }
 
 impl Visiter for AstPrinter {
-    type Output = String;
-    fn visit_expr(&self, expr: &Expr) -> Self::Output {
+    type Expr = String;
+    fn visit_expr(&self, expr: &Expr) -> Self::Expr {
         match *expr {
             Expr::Assign {
                 ref name,

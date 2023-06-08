@@ -97,9 +97,9 @@ impl Iterator for Lexer {
                 }
                 '>' => {
                     if self.match_advance('=') {
-                        Some(LessEqual)
+                        Some(GreaterEqual)
                     } else {
-                        Some(Less)
+                        Some(Greater)
                     }
                 }
                 '/' => {
@@ -136,9 +136,10 @@ impl Iterator for Lexer {
                     if c.is_numeric() {
                         let mut number = String::new();
                         number.push(*c);
-                        while let Some(c) = self.advance() {
+                        while let Some(c) = self.peek() {
                             if c.is_numeric() || c == &'.' {
                                 number.push(*c);
+                                self.advance();
                             } else {
                                 break;
                             }
@@ -147,9 +148,10 @@ impl Iterator for Lexer {
                     } else if c.is_alphabetic() {
                         let mut identifier = String::new();
                         identifier.push(*c);
-                        while let Some(c) = self.advance() {
+                        while let Some(c) = self.peek() {
                             if c.is_alphanumeric() {
                                 identifier.push(*c);
+                                self.advance();
                             } else {
                                 break;
                             }

@@ -1,7 +1,11 @@
 use super::Expr;
+use super::Stmt;
 
 pub trait Visiter {
-    type Output;
+    type Expr;
+    type Stmt;
 
-    fn visit_expr(&self, expr: &Expr) -> Self::Output;
+    fn visit_expr(&self, expr: &Expr) -> Self::Expr;
+
+    fn visit_stmt(&self, stmt: &Stmt) -> Self::Stmt;
 }

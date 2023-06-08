@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, Stmt};
 use crate::lexer::Token::{self, *};
 
 use std::cell::Cell;
@@ -16,13 +16,93 @@ impl Parser {
         }
     }
 
-    pub fn parse(&self) -> Result<Expr, &'static str> {
-        self.expression()
+    pub fn parse(&self) -> Result<Vec<Stmt>, &'static str> {
+        let mut statements = Vec::new();
+        while let Some(t) = self.peek() {
+            if let Eof = t {
+                break;
+            }
+            statements.push(self.declaration()?);
+        }
+        Ok(statements)
+    }
+
+    // SECTION - Statements
+    fn declaration(&self) -> Result<Stmt, &'static str> {
+        match self.peek().expect("Current token is None") {
+            Var => self.var_declaration(),
+            _ => self.statement(),
+        }
+    }
+
+    fn var_declaration(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        if let Some(Identifier(name)) = self.advance() {
+            let mut initializer = None;
+            if let Some(Equal) = self.peek() {
+                self.advance();
+                initializer = Some(self.expression()?);
+            }
+            if let Some(Semicolon) = self.advance() {
+                return Ok(Stmt::Var {
+                    name: Identifier(name.to_string()),
+                    initializer,
+                });
+            } else {
+                return Err("Expect ';' after variable declaration.");
+            }
+        } else {
+            return Err("Expect variable name.");
+        }
+    }
+
+    fn statement(&self) -> Result<Stmt, &'static str> {
+        match self.peek().expect("Current token is None") {
+            Print => self.print_statement(),
+            _ => self.expr_statement(),
+        }
+    }
+
+    fn print_statement(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        let value = self.expression()?;
+        if let Some(Semicolon) = self.peek() {
+            self.advance();
+            Ok(Stmt::Print { expression: value })
+        } else {
+            Err("Expect ';' after value.")
+        }
+    }
+
+    fn expr_statement(&self) -> Result<Stmt, &'static str> {
+        let expr = self.expression()?;
+        if let Some(Semicolon) = self.peek() {
+            self.advance();
+            Ok(Stmt::Expression { expression: expr })
+        } else {
+            Err("Expect ';' after expression.")
+        }
     }
 
     // SECTION - Expressions
     fn expression(&self) -> Result<Expr, &'static str> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&self) -> Result<Expr, &'static str> {
+        let expr = self.equality()?;
+        if let Some(Token::Equal) = self.peek() {
+            self.advance();
+            let value = self.assignment()?;
+
+            if let Expr::Variable { ref name } = expr {
+                return Ok(Expr::Assign { name: name.clone(), value: Box::new(value) })
+            } else {
+                return Err("Invalid assignment target.");
+            }
+
+        }
+        Ok(expr)
     }
 
     fn equality(&self) -> Result<Expr, &'static str> {
@@ -132,6 +212,12 @@ impl Parser {
                 return Ok(Expr::Literal {
                     value: Str(s.to_string()),
                 });
+            }
+            Some(Identifier(name)) => {
+                self.advance();
+                Ok(Expr::Variable {
+                    name: Identifier(name.to_string()),
+                })
             }
             Some(LeftParen) => {
                 self.advance();
