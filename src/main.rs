@@ -1,11 +1,8 @@
-mod lexer;
+use lox_rs::{ast::*, interpreter::*, lexer::*, parser::*};
 
-use lexer::Lexer;
-use lox_rs::{lexer::*, ast::*};
-
-use std::{env, io::Result, fs::*};
-use rustyline::{error::ReadlineError, DefaultEditor};
 use colored::Colorize;
+use rustyline::{error::ReadlineError, DefaultEditor};
+use std::{env, fs::*, io::Result};
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() == 0 {
@@ -23,14 +20,14 @@ fn main() {
     }
 }
 
-pub fn run_prompt() -> Result<()>  {
+pub fn run_prompt() -> Result<()> {
     let mut reader = DefaultEditor::new().unwrap();
+    let interpreter = Interpreter::new();
     loop {
         let line = reader.readline_with_initial("> ", ("", ""));
         match line {
             Ok(line) => {
-                run(&line);
-                
+                run(&line, &interpreter);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("{}", "CTRL-C".cyan().dimmed());
@@ -47,12 +44,24 @@ pub fn run_prompt() -> Result<()>  {
 
 pub fn run_file(path: &str) -> Result<()> {
     let source = std::fs::read_to_string(path).unwrap();
-    run(&source);
+    let interpreter = Interpreter::new();
+    run(&source, &interpreter);
     Ok(())
 }
 
-pub fn run(source: &str) {
+pub fn run(source: &str, interpreter: &Interpreter) {
+
     let mut lexer = Lexer::new(source);
     let tokens = lexer.scan_tokens();
-    println!("{:?}", tokens);
+    // println!("{tokens:?}");
+    let mut parser = Parser::new(tokens);
+    // let expr = parser.parse();
+    let stmts = parser.parse();
+
+    match stmts {
+        Ok(ref stmts) => {
+            interpreter.interpret(stmts);
+        }
+        Err(e) => eprintln!("{}", e),
+    };
 }
