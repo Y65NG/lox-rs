@@ -74,6 +74,7 @@ impl Iterator for Lexer {
                 '+' => Some(Plus),
                 ';' => Some(Semicolon),
                 '*' => Some(Star),
+                '%' => Some(Mod),
                 '!' => {
                     if self.match_advance('=') {
                         Some(BangEqual)

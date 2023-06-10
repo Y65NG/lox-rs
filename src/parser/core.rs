@@ -6,13 +6,15 @@ use std::cell::Cell;
 pub struct Parser {
     tokens: Vec<Token>,
     current: Cell<usize>,
+    is_repl: bool,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(tokens: Vec<Token>, is_repl: bool) -> Self {
         Self {
             tokens,
             current: Cell::new(0),
+            is_repl,
         }
     }
 
@@ -58,9 +60,27 @@ impl Parser {
 
     fn statement(&self) -> Result<Stmt, &'static str> {
         match self.peek().expect("Current token is None") {
+            If => self.if_statement(),
             Print => self.print_statement(),
+            While => self.while_statement(),
+            LBrace => self.block(),
             _ => self.expr_statement(),
         }
+    }
+
+    fn if_statement(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        let condition = self.expression()?;
+        let then_branch = Box::new(self.statement()?);
+        let mut else_branch = None;
+        if let Some(Token::Else) = self.peek() {
+            else_branch = Some(Box::new(self.statement()?));
+        }
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn print_statement(&self) -> Result<Stmt, &'static str> {
@@ -74,11 +94,41 @@ impl Parser {
         }
     }
 
+    fn while_statement(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        let condition = self.expression()?;
+        let body = Box::new(self.statement()?);
+        Ok(Stmt::While { condition, body })
+    }
+
+    fn block(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        let mut statements = Vec::new();
+        while let Some(t) = self.peek() {
+            match t {
+                RBrace | Eof => {
+                    break;
+                }
+                _ => {
+                    statements.push(self.declaration()?);
+                }
+            }
+        }
+        if let Some(RBrace) = self.peek() {
+            self.advance();
+            return Ok(Stmt::Block { statements });
+        } else {
+            Err("Expect '}' after expression.")
+        }
+    }
+
     fn expr_statement(&self) -> Result<Stmt, &'static str> {
         let expr = self.expression()?;
         if let Some(Semicolon) = self.peek() {
             self.advance();
             Ok(Stmt::Expression { expression: expr })
+        } else if self.is_repl {
+            Ok(Stmt::Print { expression: expr })
         } else {
             Err("Expect ';' after expression.")
         }
@@ -90,17 +140,48 @@ impl Parser {
     }
 
     fn assignment(&self) -> Result<Expr, &'static str> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
         if let Some(Token::Equal) = self.peek() {
             self.advance();
             let value = self.assignment()?;
 
             if let Expr::Variable { ref name } = expr {
-                return Ok(Expr::Assign { name: name.clone(), value: Box::new(value) })
+                return Ok(Expr::Assign {
+                    name: name.clone(),
+                    value: Box::new(value),
+                });
             } else {
                 return Err("Invalid assignment target.");
             }
+        }
+        Ok(expr)
+    }
 
+    fn or(&self) -> Result<Expr, &'static str> {
+        let mut expr = self.and()?;
+        while let Some(Token::Or) = self.peek() {
+            self.advance();
+            let right = self.and()?;
+            expr = Expr::Logical {
+                left: Box::new(expr),
+                operator: Token::Or,
+                right: Box::new(right),
+            }
+        }
+        Ok(expr)
+    }
+
+    fn and(&self) -> Result<Expr, &'static str> {
+        let mut expr = self.equality()?;
+
+        while let Some(Token::And) = self.peek() {
+            self.advance();
+            let right = self.equality()?;
+            expr = Expr::Logical {
+                left: Box::new(expr),
+                operator: Token::And,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
@@ -161,7 +242,7 @@ impl Parser {
         let mut expr = self.unary()?;
 
         while let Some(operator) = match self.peek() {
-            Some(&Slash) | Some(&Star) => self.advance(),
+            Some(&Slash) | Some(&Star) | Some(&Mod) => self.advance(),
             _ => None,
         } {
             let right = self.unary()?;
@@ -219,10 +300,10 @@ impl Parser {
                     name: Identifier(name.to_string()),
                 })
             }
-            Some(LeftParen) => {
+            Some(LParen) => {
                 self.advance();
                 let expr = self.expression();
-                if let Some(RightParen) = self.peek() {
+                if let Some(RParen) = self.peek() {
                     self.advance();
                 } else {
                     return Err("Expect ')' after expression.");

@@ -5,22 +5,55 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+#[derive(Clone)]
 pub struct Environment {
-    values: Rc<RefCell<HashMap<String, Type>>>,
+    env: Rc<RefCell<EnvNode>>,
 }
 
 impl Environment {
     pub fn new() -> Self {
         Self {
-            values: Rc::new(RefCell::new(HashMap::new())),
+            env: Rc::new(RefCell::new(EnvNode::new(None))),
         }
     }
 
+    pub fn set(&mut self, enclosing: Environment) {
+        self.env = enclosing.env;
+    }
+
     pub fn assign(&self, name: Token, value: Type) -> Result<(), RuntimeError> {
+        self.env.borrow_mut().assign(name, value)
+    }
+
+    pub fn define(&self, name: &str, value: Type) {
+        self.env.borrow_mut().define(name, value)
+    }
+
+    pub fn get(&self, token: &Token) -> Result<Type, RuntimeError> {
+        self.env.borrow().get(token)
+    }
+}
+
+struct EnvNode {
+    values: HashMap<String, Type>,
+    enclosing: Option<Rc<RefCell<EnvNode>>>,
+}
+
+impl EnvNode {
+    pub fn new(enclosing: Option<Rc<RefCell<EnvNode>>>) -> Self {
+        Self {
+            values: HashMap::new(),
+            enclosing,
+        }
+    }
+
+    pub fn assign(&mut self, name: Token, value: Type) -> Result<(), RuntimeError> {
         if let Token::Identifier(ref var_name) = name {
-            if self.values.borrow().contains_key(var_name) {
-                self.values.borrow_mut().insert(var_name.to_string(), value);
+            if self.values.contains_key(var_name) {
+                self.values.insert(var_name.to_string(), value);
                 return Ok(());
+            } else if let Some(ref mut enclosing) = self.enclosing {
+                return enclosing.borrow_mut().assign(name, value);
             } else {
                 return Err(RuntimeError(
                     name.clone(),
@@ -31,14 +64,16 @@ impl Environment {
         !unreachable!()
     }
 
-    pub fn define(&self, name: &str, value: Type) {
-        self.values.borrow_mut().insert(name.to_string(), value);
+    pub fn define(&mut self, name: &str, value: Type) {
+        self.values.insert(name.to_string(), value);
     }
 
     pub fn get(&self, token: &Token) -> Result<Type, RuntimeError> {
         if let Token::Identifier(name) = token {
-            if let Some(result) = self.values.borrow().get(name) {
+            if let Some(result) = self.values.get(name) {
                 return Ok(result.clone());
+            } else if let Some(ref enclosing) = self.enclosing {
+                return enclosing.borrow().get(token);
             } else {
                 return Err(RuntimeError(
                     token.clone(),

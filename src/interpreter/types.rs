@@ -11,10 +11,18 @@ pub enum Type {
     Nil,
 }
 
-// pub struct Function {
-//     params: Vec<Token>,
-//     body: Vec<Stmt>,
-// }
+impl Type {
+    pub fn is_true(&self) -> bool {
+        match self {
+            Self::Number(n) => {
+                n.is_normal()
+            }
+            Self::Boolean(b) => *b,
+            Self::String(s) => !s.is_empty(),
+            _ => false
+        }
+    }
+}
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

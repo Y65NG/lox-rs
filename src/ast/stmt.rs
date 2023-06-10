@@ -26,4 +26,14 @@ pub enum Stmt {
     Var {
         name: Token,
         initializer: Option<Expr>,
-    }}
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+}

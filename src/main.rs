@@ -27,7 +27,7 @@ pub fn run_prompt() -> Result<()> {
         let line = reader.readline_with_initial("> ", ("", ""));
         match line {
             Ok(line) => {
-                run(&line, &interpreter);
+                run(&line, &interpreter, true);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("{}", "CTRL-C".cyan().dimmed());
@@ -45,16 +45,15 @@ pub fn run_prompt() -> Result<()> {
 pub fn run_file(path: &str) -> Result<()> {
     let source = std::fs::read_to_string(path).unwrap();
     let interpreter = Interpreter::new();
-    run(&source, &interpreter);
+    run(&source, &interpreter, false);
     Ok(())
 }
 
-pub fn run(source: &str, interpreter: &Interpreter) {
+pub fn run(source: &str, interpreter: &Interpreter, is_repl: bool) {
 
     let mut lexer = Lexer::new(source);
     let tokens = lexer.scan_tokens();
-    // println!("{tokens:?}");
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(tokens, is_repl);
     // let expr = parser.parse();
     let stmts = parser.parse();
 

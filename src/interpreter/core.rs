@@ -3,15 +3,17 @@ use crate::{
     ast::{Expr, Stmt, Visiter},
     lexer::Token,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct Interpreter {
-    environment: Environment,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Self {
-            environment: Environment::new(),
+            environment: Rc::new(RefCell::new(Environment::new())),
         }
     }
     pub fn interpret(&self, statements: &[Stmt]) {
@@ -70,13 +72,38 @@ impl Visiter for Interpreter {
                     )),
                 }
             }
-            Expr::Variable { name } => Ok(self.environment.get(name)?),
+            Expr::Variable { name } => Ok(self.environment.borrow().get(name)?),
             Expr::Assign { name, value } => {
                 let value = self.visit_expr(&value)?;
-                if let Err(e) = self.environment.assign(name.clone(), value.clone()) {
+                if let Err(e) = self
+                    .environment
+                    .borrow_mut()
+                    .assign(name.clone(), value.clone())
+                {
                     return Err(e);
                 }
                 Ok(value)
+            }
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left = self.visit_expr(left)?;
+                match operator {
+                    Token::Or => {
+                        if left.is_true() {
+                            return Ok(left);
+                        }
+                    }
+                    Token::And => {
+                        if !left.is_true() {
+                            return Ok(left);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                Ok(self.visit_expr(right)?)
             }
             Expr::Binary {
                 left,
@@ -118,6 +145,16 @@ impl Visiter for Interpreter {
                     Token::Star => {
                         if let (Type::Number(n1), Type::Number(n2)) = (left, right) {
                             Ok(Type::Number(n1 * n2))
+                        } else {
+                            Err(RuntimeError(
+                                operator.clone(),
+                                "Operand must be numbers.".to_string(),
+                            ))
+                        }
+                    }
+                    Token::Mod => {
+                        if let (Type::Number(n1), Type::Number(n2)) = (left, right) {
+                            Ok(Type::Number(n1 % n2))
                         } else {
                             Err(RuntimeError(
                                 operator.clone(),
@@ -179,6 +216,7 @@ impl Visiter for Interpreter {
                         (Type::Nil, Type::Nil) => Ok(Type::Boolean(true)),
                         _ => Ok(Type::Boolean(false)),
                     },
+
                     _ => Err(RuntimeError(
                         operator.clone(),
                         "Unexpected token.".to_string(),
@@ -192,7 +230,7 @@ impl Visiter for Interpreter {
     fn visit_stmt(&self, stmt: &Stmt) -> Self::Stmt {
         match stmt {
             Stmt::Expression { expression } => {
-                self.visit_expr(expression);
+                self.visit_expr(expression)?;
                 Ok(())
             }
             Stmt::Print { expression } => {
@@ -207,7 +245,45 @@ impl Visiter for Interpreter {
                     value = self.visit_expr(initializer)?;
                 }
                 if let Token::Identifier(name) = name {
-                    self.environment.define(name, value);
+                    self.environment.borrow_mut().define(name, value);
+                }
+                Ok(())
+            }
+            Stmt::While { condition, body } => {
+                while self.visit_expr(condition)?.is_true() {
+                    self.visit_stmt(body)?;
+                }
+                Ok(())
+            }
+            Stmt::Block { statements } => {
+                let prev_env = self.environment.replace(Environment::new());
+                self.environment.borrow_mut().set(prev_env.clone());
+                for statement in statements {
+                    if let Err(e) = self.visit_stmt(statement) {
+                        self.environment.replace(prev_env);
+                        return Err(e);
+                    }
+                }
+                self.environment.replace(prev_env);
+                Ok(())
+            }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                if let Ok(condition) = self.visit_expr(condition) {
+                    match condition {
+                        Type::Boolean(true) => {
+                            self.visit_stmt(&then_branch)?;
+                        }
+                        Type::Boolean(false) => {
+                            if let Some(else_branch) = else_branch {
+                                self.visit_stmt(else_branch)?;
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
                 }
                 Ok(())
             }

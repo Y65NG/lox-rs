@@ -12,6 +12,7 @@ pub enum Token {
     Semicolon,
     Slash,
     Star,
+    Mod,
 
     // One or two charactor tokens.
     Bang,
