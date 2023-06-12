@@ -44,7 +44,7 @@ impl Parser {
     // SECTION - Statements
     fn declaration(&self) -> Result<Stmt, &'static str> {
         match self.peek().expect("Current token is None") {
-            Fn => self.function(),
+            Fun => self.function(),
             Var => self.var_declaration(),
             _ => self.statement(),
         }
@@ -156,8 +156,6 @@ impl Parser {
         }
     }
 
-    
-
     fn for_statement(&self) -> Result<Stmt, &'static str> {
         self.advance();
         let initializer = Box::new(self.declaration()?);
@@ -193,7 +191,10 @@ impl Parser {
         } else {
             return Err("Expect ';' after return value.");
         }
-        Ok(Stmt::Return { keyword: keyword.clone(), value })
+        Ok(Stmt::Return {
+            keyword: keyword.clone(),
+            value,
+        })
     }
 
     fn while_statement(&self) -> Result<Stmt, &'static str> {
@@ -472,7 +473,7 @@ impl Parser {
                 return;
             }
             match t {
-                Class | Fn | Var | For | If | While | Print | Return => return,
+                Class | Fun | Var | For | If | While | Print | Return => return,
                 _ => self.advance(),
             };
         }
