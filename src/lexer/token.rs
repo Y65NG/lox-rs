@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Single-charactor tokens.
     LParen,
@@ -34,7 +34,7 @@ pub enum Token {
     Class,
     Else,
     False,
-    Fun,
+    Fn,
     For,
     If,
     Nil,
@@ -50,7 +50,6 @@ pub enum Token {
     Eof,
 }
 
-
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?} ", self)
@@ -65,7 +64,7 @@ pub fn keywords(s: &str) -> Token {
         "else" => Else,
         "false" => False,
         "for" => For,
-        "fun" => Fun,
+        "fn" => Fn,
         "if" => If,
         "nil" => Nil,
         "or" => Or,

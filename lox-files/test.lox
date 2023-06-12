@@ -1,7 +1,24 @@
-var a = 10;
-while a < 20 {
-    if a % 2 == 0 {
-        print a;
-    }    
-    a = a + 1;
+// var a = 10;
+// while a < 20 {
+//     if a % 2 == 0 {
+//         print a;
+//     }    
+//     a = a + 1;
+// }
+
+// for var a = 10; a < 20; a = a + 1 {
+//     if a % 2 == 0 {
+//         print a;
+//     }
+// }
+
+fn fibo(n) {
+    if n == 0 or n == 1 { 
+        return 1; 
+    }
+    return fibo(n - 1) + fibo(n - 2);
+}
+
+for (var a = 0; a < 10; a = a + 1) {
+    print fibo(a);
 }

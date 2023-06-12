@@ -1,5 +1,6 @@
 use crate::lexer::Token;
 
+use super::native_functions::Clock;
 use super::{types::Type, RuntimeError};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,14 +12,24 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new() -> Self {
+    pub fn new(enclosing: Option<&Environment>) -> Self {
+        let enclosing_node = match enclosing {
+            Some(env) => Some(Rc::clone(&env.env)),
+            None => None,
+        };
         Self {
-            env: Rc::new(RefCell::new(EnvNode::new(None))),
+            env: Rc::new(RefCell::new(EnvNode::new(enclosing_node))),
         }
     }
 
-    pub fn set(&mut self, enclosing: Environment) {
-        self.env = enclosing.env;
+    pub fn global() -> Self {
+        Self {
+            env: Rc::new(RefCell::new(EnvNode::global())),
+        }
+    }
+
+    pub fn set_enclosing(&mut self, enclosing: Environment) {
+        self.env.borrow_mut().enclosing = Some(enclosing.env.clone());
     }
 
     pub fn assign(&self, name: Token, value: Type) -> Result<(), RuntimeError> {
@@ -47,6 +58,15 @@ impl EnvNode {
         }
     }
 
+    pub fn global() -> Self {
+        let mut global = EnvNode::new(None);
+        let clock = Type::Callable(Rc::new(Clock {}));
+
+        global.define("clock", clock);
+
+        global
+    }
+
     pub fn assign(&mut self, name: Token, value: Type) -> Result<(), RuntimeError> {
         if let Token::Identifier(ref var_name) = name {
             if self.values.contains_key(var_name) {
@@ -61,7 +81,7 @@ impl EnvNode {
                 ));
             }
         }
-        !unreachable!()
+        unreachable!()
     }
 
     pub fn define(&mut self, name: &str, value: Type) {

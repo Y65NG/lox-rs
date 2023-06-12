@@ -1,38 +1,71 @@
-use super::{env::Environment, error::RuntimeError, types::*};
+use super::{
+    env::Environment,
+    error::RuntimeError,
+    types::{self, *},
+};
 use crate::{
     ast::{Expr, Stmt, Visiter},
     lexer::Token,
 };
-use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct Interpreter {
-    environment: Rc<RefCell<Environment>>,
+    pub globals: Environment,
+    environment: Environment,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        let globals = Environment::global();
+        let environment = globals.clone();
         Self {
-            environment: Rc::new(RefCell::new(Environment::new())),
+            globals,
+            environment,
         }
     }
-    pub fn interpret(&self, statements: &[Stmt]) {
+    pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), String> {
         for stmt in statements {
             match self.visit_stmt(&stmt) {
                 Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Panicked at {}", e.0);
-                    eprintln!("{}", e.1);
+                Err(ReturnValue::Err(e)) => {
+                    // eprintln!("Panicked at {}", e.0);
+                    return Err(e);
+                }
+                Err(ReturnValue::Return(_)) => {
+                    return Err("Only functions can return values.".to_string());
                 }
             }
         }
+        Ok(())
+    }
+
+    pub fn execute_block(
+        &mut self,
+        block: &[Stmt],
+        mut environment: Environment,
+    ) -> Result<(), ReturnValue> {
+        std::mem::swap(&mut self.environment, &mut environment);
+        for stmt in block {
+            match self.visit_stmt(stmt) {
+                Ok(()) => Ok(()),
+                Err(value) => match value {
+                    ReturnValue::Err(e) => Err(ReturnValue::Err(e)),
+                    ReturnValue::Return(t) => {
+                        std::mem::swap(&mut self.environment, &mut environment);
+                        return Err(ReturnValue::Return(t));
+                    }
+                },
+            };
+        }
+        std::mem::swap(&mut self.environment, &mut environment);
+        Ok(())
     }
 }
 
 impl Visiter for Interpreter {
     type Expr = Result<Type, RuntimeError>;
-    type Stmt = Result<(), RuntimeError>;
-    fn visit_expr(&self, expr: &Expr) -> Self::Expr {
+    type Stmt = Result<(), ReturnValue>;
+    fn visit_expr(&mut self, expr: &Expr) -> Self::Expr {
         match expr {
             Expr::Literal { value } => match value {
                 Token::Number(n) => Ok(Type::Number(*n)),
@@ -72,14 +105,10 @@ impl Visiter for Interpreter {
                     )),
                 }
             }
-            Expr::Variable { name } => Ok(self.environment.borrow().get(name)?),
+            Expr::Variable { name } => Ok(self.environment.get(name)?),
             Expr::Assign { name, value } => {
                 let value = self.visit_expr(&value)?;
-                if let Err(e) = self
-                    .environment
-                    .borrow_mut()
-                    .assign(name.clone(), value.clone())
-                {
+                if let Err(e) = self.environment.assign(name.clone(), value.clone()) {
                     return Err(e);
                 }
                 Ok(value)
@@ -223,21 +252,65 @@ impl Visiter for Interpreter {
                     )),
                 }
             }
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => {
+                let callee = self.visit_expr(callee)?;
+                let mut args = Vec::new();
+                for arg in arguments {
+                    args.push(self.visit_expr(arg)?);
+                }
+                match callee {
+                    Type::Callable(func) => func.call(self, args),
+                    _ => Err(RuntimeError(
+                        paren.clone(),
+                        "Can only call functions and classes.".to_string(),
+                    )),
+                }
+            }
             _ => Err(RuntimeError(Token::Eof, "Unexpected token.".to_string())),
         }
     }
 
-    fn visit_stmt(&self, stmt: &Stmt) -> Self::Stmt {
+    fn visit_stmt(&mut self, stmt: &Stmt) -> Self::Stmt {
         match stmt {
             Stmt::Expression { expression } => {
                 self.visit_expr(expression)?;
                 Ok(())
             }
+            Stmt::Function { name, params, body } => {
+                let function = types::Function {
+                    name: name.clone(),
+                    params: params.clone(),
+                    body: body.clone(),
+                };
+                self.environment.define(
+                    if let Token::Identifier(ref n) = name {
+                        n
+                    } else {
+                        unreachable!()
+                    },
+                    Type::Callable(Rc::new(function)),
+                );
+                Ok(())
+            }
             Stmt::Print { expression } => {
                 // dbg!(expression);
                 let value = self.visit_expr(expression)?;
-                println!("{}", value);
+                match value {
+                    Type::Nil => (),
+                    _ => println!("{}", value),
+                }
                 Ok(())
+            }
+            Stmt::Return { keyword, value } => {
+                if let Some(value) = value {
+                    Err(ReturnValue::Return(self.visit_expr(value)?))
+                } else {
+                    Err(ReturnValue::Return(Type::Nil))
+                }
             }
             Stmt::Var { name, initializer } => {
                 let mut value = Type::Nil;
@@ -245,8 +318,23 @@ impl Visiter for Interpreter {
                     value = self.visit_expr(initializer)?;
                 }
                 if let Token::Identifier(name) = name {
-                    self.environment.borrow_mut().define(name, value);
+                    self.environment.define(name, value);
                 }
+                Ok(())
+            }
+            Stmt::For {
+                initializer,
+                condition,
+                body,
+            } => {
+                let mut statements: Vec<Stmt> = Vec::new();
+                statements.push(*initializer.clone());
+                let while_loop = Stmt::While {
+                    condition: condition.clone(),
+                    body: body.clone(),
+                };
+                statements.push(while_loop);
+                self.visit_stmt(&Stmt::Block { statements })?;
                 Ok(())
             }
             Stmt::While { condition, body } => {
@@ -256,15 +344,8 @@ impl Visiter for Interpreter {
                 Ok(())
             }
             Stmt::Block { statements } => {
-                let prev_env = self.environment.replace(Environment::new());
-                self.environment.borrow_mut().set(prev_env.clone());
-                for statement in statements {
-                    if let Err(e) = self.visit_stmt(statement) {
-                        self.environment.replace(prev_env);
-                        return Err(e);
-                    }
-                }
-                self.environment.replace(prev_env);
+                let mut local = Environment::new(Some(&self.environment));
+                self.execute_block(statements, local)?;
                 Ok(())
             }
             Stmt::If {
@@ -287,7 +368,7 @@ impl Visiter for Interpreter {
                 }
                 Ok(())
             }
-            _ => Err(RuntimeError(Token::Eof, "Unexpected token.".to_string())),
+            _ => Err(ReturnValue::Err("Unexpected token.".to_string())),
         }
     }
 }

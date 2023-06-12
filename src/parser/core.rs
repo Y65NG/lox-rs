@@ -18,23 +18,83 @@ impl Parser {
         }
     }
 
-    pub fn parse(&self) -> Result<Vec<Stmt>, &'static str> {
+    pub fn parse(&self) -> Result<Vec<Stmt>, String> {
+        let mut errs = Vec::new();
         let mut statements = Vec::new();
         while let Some(t) = self.peek() {
             if let Eof = t {
                 break;
             }
-            statements.push(self.declaration()?);
+            match self.declaration() {
+                Ok(statement) => statements.push(statement),
+                Err(e) => {
+                    errs.push(e);
+                    self.synchronize();
+                }
+            }
         }
-        Ok(statements)
+
+        if errs.is_empty() {
+            Ok(statements)
+        } else {
+            Err(errs.join("\n"))
+        }
     }
 
     // SECTION - Statements
     fn declaration(&self) -> Result<Stmt, &'static str> {
         match self.peek().expect("Current token is None") {
+            Fn => self.function(),
             Var => self.var_declaration(),
             _ => self.statement(),
         }
+    }
+
+    fn function(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        let name = match self.peek() {
+            Some(t @ Token::Identifier(_)) => {
+                self.advance();
+                t.clone()
+            }
+            _ => return Err("Expect function name."),
+        };
+        if self.peek() == Some(&Token::LParen) {
+            self.advance();
+        } else {
+            return Err("Expect '(' after function name.");
+        }
+        let mut params = Vec::new();
+        if self.peek() != Some(&Token::RParen) {
+            loop {
+                if params.len() >= 255 {
+                    return Err("Can't have more than 255 parameters.");
+                }
+
+                params.push(if let Some(t @ Token::Identifier(_)) = self.peek() {
+                    self.advance();
+                    t.clone()
+                } else {
+                    return Err("");
+                });
+                if self.peek() == Some(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        if self.peek() == Some(&Token::RParen) {
+            self.advance();
+        } else {
+            return Err("Expect ')' after parameters.");
+        }
+        if self.peek() == Some(&Token::LBrace) {
+        } else {
+            return Err("Expct '{' before function body.");
+        }
+        let body = Box::new(self.block()?);
+        Ok(Stmt::Function { name, params, body })
     }
 
     fn var_declaration(&self) -> Result<Stmt, &'static str> {
@@ -62,6 +122,8 @@ impl Parser {
         match self.peek().expect("Current token is None") {
             If => self.if_statement(),
             Print => self.print_statement(),
+            For => self.for_statement(),
+            Return => self.return_statement(),
             While => self.while_statement(),
             LBrace => self.block(),
             _ => self.expr_statement(),
@@ -73,7 +135,7 @@ impl Parser {
         let condition = self.expression()?;
         let then_branch = Box::new(self.statement()?);
         let mut else_branch = None;
-        if let Some(Token::Else) = self.peek() {
+        if self.peek() == Some(&Token::Else) {
             else_branch = Some(Box::new(self.statement()?));
         }
         Ok(Stmt::If {
@@ -86,12 +148,52 @@ impl Parser {
     fn print_statement(&self) -> Result<Stmt, &'static str> {
         self.advance();
         let value = self.expression()?;
-        if let Some(Semicolon) = self.peek() {
+        if self.peek() == Some(&Semicolon) {
             self.advance();
             Ok(Stmt::Print { expression: value })
         } else {
             Err("Expect ';' after value.")
         }
+    }
+
+    
+
+    fn for_statement(&self) -> Result<Stmt, &'static str> {
+        self.advance();
+        let initializer = Box::new(self.declaration()?);
+        let condition = self.expression()?;
+        match self.peek() {
+            Some(Semicolon) => self.advance(),
+            _ => return Err("Expect ';' after condition."),
+        };
+        let increment = self.expression()?;
+        let body = Box::new(Stmt::Block {
+            statements: vec![
+                self.statement()?,
+                Stmt::Expression {
+                    expression: increment,
+                },
+            ],
+        });
+        Ok(Stmt::For {
+            initializer,
+            condition,
+            body,
+        })
+    }
+
+    fn return_statement(&self) -> Result<Stmt, &'static str> {
+        let keyword = self.advance().unwrap();
+        let mut value = None;
+        if self.peek() != Some(&Token::Semicolon) {
+            value = Some(self.expression()?);
+        }
+        if self.peek() == Some(&Token::Semicolon) {
+            self.advance();
+        } else {
+            return Err("Expect ';' after return value.");
+        }
+        Ok(Stmt::Return { keyword: keyword.clone(), value })
     }
 
     fn while_statement(&self) -> Result<Stmt, &'static str> {
@@ -114,7 +216,7 @@ impl Parser {
                 }
             }
         }
-        if let Some(RBrace) = self.peek() {
+        if self.peek() == Some(&RBrace) {
             self.advance();
             return Ok(Stmt::Block { statements });
         } else {
@@ -124,7 +226,7 @@ impl Parser {
 
     fn expr_statement(&self) -> Result<Stmt, &'static str> {
         let expr = self.expression()?;
-        if let Some(Semicolon) = self.peek() {
+        if self.peek() == Some(&Semicolon) {
             self.advance();
             Ok(Stmt::Expression { expression: expr })
         } else if self.is_repl {
@@ -265,8 +367,49 @@ impl Parser {
                     right: Box::new(right),
                 });
             }
-            _ => self.primary(),
+            _ => self.call(),
         }
+    }
+
+    fn call(&self) -> Result<Expr, &'static str> {
+        let mut expr = self.primary()?;
+        loop {
+            if let Some(LParen) = self.peek() {
+                self.advance();
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn finish_call(&self, callee: Expr) -> Result<Expr, &'static str> {
+        let mut arguments = Vec::new();
+        while let Some(t) = self.peek() {
+            if let Token::RParen = t {
+                break;
+            }
+            if arguments.len() >= 255 {
+                return Err("Can't have more than 255 arguments.");
+            }
+            arguments.push(self.expression()?);
+            if let Some(Token::Comma) = self.peek() {
+                self.advance();
+            }
+        }
+        let r_paren = match self.peek() {
+            Some(Token::RParen) => self.advance(),
+            _ => return Err("Expect ')' after arguments."),
+        }
+        .unwrap()
+        .clone();
+
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            paren: r_paren,
+            arguments,
+        })
     }
 
     fn primary(&self) -> Result<Expr, &'static str> {
@@ -329,7 +472,7 @@ impl Parser {
                 return;
             }
             match t {
-                Class | Fun | Var | For | If | While | Print | Return => return,
+                Class | Fn | Var | For | If | While | Print | Return => return,
                 _ => self.advance(),
             };
         }

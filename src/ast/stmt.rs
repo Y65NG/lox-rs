@@ -2,7 +2,7 @@ use crate::lexer::Token;
 
 use super::Expr;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Block {
         statements: Vec<Stmt>,
@@ -18,7 +18,7 @@ pub enum Stmt {
     Function {
         name: Token,
         params: Vec<Token>,
-        body: Vec<Stmt>,
+        body: Box<Stmt>,
     },
     Print {
         expression: Expr,
@@ -30,6 +30,15 @@ pub enum Stmt {
     While {
         condition: Expr,
         body: Box<Stmt>,
+    },
+    For {
+        initializer: Box<Stmt>,
+        condition: Expr,
+        body: Box<Stmt>,
+    },
+    Return {
+        keyword: Token,
+        value: Option<Expr>,
     },
     If {
         condition: Expr,

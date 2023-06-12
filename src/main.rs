@@ -1,19 +1,18 @@
-use lox_rs::{ast::*, interpreter::*, lexer::*, parser::*};
+use lox_rs::{interpreter::*, lexer::*, parser::*};
 
 use colored::Colorize;
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::{env, fs::*, io::Result};
+use std::{env, io::Result};
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() == 0 {
-        run_prompt();
+        let _ = run_prompt();
     } else {
         let files: Vec<&String> = args.iter().filter(|arg| arg.ends_with("lox")).collect();
         if files.len() == 0 {
-            // unreachable!("Please enter valid path!")
-            run_prompt();
+            let _ = run_prompt();
         } else if files.len() == 1 {
-            run_file(files[0]);
+            let _ = run_file(files[0]);
         } else {
             unreachable!("Please enter single file only!")
         }
@@ -22,12 +21,12 @@ fn main() {
 
 pub fn run_prompt() -> Result<()> {
     let mut reader = DefaultEditor::new().unwrap();
-    let interpreter = Interpreter::new();
+    let mut interpreter = Interpreter::new();
     loop {
         let line = reader.readline_with_initial("> ", ("", ""));
         match line {
             Ok(line) => {
-                run(&line, &interpreter, true);
+                run(&line, &mut interpreter, true);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("{}", "CTRL-C".cyan().dimmed());
@@ -44,17 +43,15 @@ pub fn run_prompt() -> Result<()> {
 
 pub fn run_file(path: &str) -> Result<()> {
     let source = std::fs::read_to_string(path).unwrap();
-    let interpreter = Interpreter::new();
-    run(&source, &interpreter, false);
+    let mut interpreter = Interpreter::new();
+    run(&source, &mut interpreter, false);
     Ok(())
 }
 
-pub fn run(source: &str, interpreter: &Interpreter, is_repl: bool) {
-
+pub fn run(source: &str, interpreter: &mut Interpreter, is_repl: bool) {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.scan_tokens();
-    let mut parser = Parser::new(tokens, is_repl);
-    // let expr = parser.parse();
+    let parser = Parser::new(tokens, is_repl);
     let stmts = parser.parse();
 
     match stmts {
